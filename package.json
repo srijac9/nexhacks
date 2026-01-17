@@ -1,0 +1,24 @@
+{
+  "name": "nexhacks",
+  "version": "1.0.0",
+  "description": "Circuit Builder",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "netlist": "node schematic_to_netlist.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/srijac9/nexhacks.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/srijac9/nexhacks/issues"
+  },
+  "homepage": "https://github.com/srijac9/nexhacks#readme",
+  "dependencies": {
+    "@google/genai": "^1.37.0"
+  }
+}
