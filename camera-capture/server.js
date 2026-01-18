@@ -63,10 +63,7 @@ app.get("/token", async (req, res) => {
 // ---- UPLOAD (snapshots from laptop viewer) ----
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadsDir),
-  filename: (_, __, cb) => {
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    cb(null, `circuit_${ts}.jpg`); // ✅ FIXED
-  },
+  filename: (_, __, cb) => cb(null, "latest.jpg"), // overwrite every time
 });
 
 const upload = multer({ storage });

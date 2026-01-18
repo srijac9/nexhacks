@@ -5,15 +5,21 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Laptop Viewer</title>
     <style>
-      body { font-family: system-ui, sans-serif; padding: 16px; }
-      #videoWrap video { width: 100%; max-width: 720px; background: #111; border-radius: 12px; }
-      button { padding: 10px 14px; margin-right: 8px; }
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 16px;
+      }
+      #videoWrap video {
+        width: 100%;
+        max-width: 720px;
+        background: #111;
+        border-radius: 12px;
+      }
     </style>
   </head>
   <body>
-    <h2>Laptop Viewer + Auto Snapshot</h2>
+    <h2>Laptop Viewer (Auto-save every 30s)</h2>
     <button id="connect">Connect</button>
-    <button id="snap" disabled>Snap now</button>
     <p id="status">Idle</p>
 
     <div id="videoWrap"></div>
@@ -23,13 +29,13 @@
 
       const status = document.getElementById("status");
       const connectBtn = document.getElementById("connect");
-      const snapBtn = document.getElementById("snap");
       const wrap = document.getElementById("videoWrap");
 
-      const SNAP_EVERY_MS = 5 * 60 * 1000; // 5 minutes
+      const SNAP_EVERY_MS = 30 * 1000; // 30 seconds
 
       let room;
       let attachedVideoEl = null;
+      let timerStarted = false;
 
       async function getToken(identity) {
         const r = await fetch(`/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`);
@@ -38,13 +44,11 @@
       }
 
       function attachTrack(track) {
-        // remove previous element (if any)
         if (attachedVideoEl) {
           attachedVideoEl.remove();
           attachedVideoEl = null;
         }
 
-        // attach returns a real <video> element that LiveKit keeps updated
         attachedVideoEl = track.attach();
         attachedVideoEl.autoplay = true;
         attachedVideoEl.playsInline = true;
@@ -53,20 +57,16 @@
         wrap.innerHTML = "";
         wrap.appendChild(attachedVideoEl);
 
-        // if network hiccups mute/unmute, re-attach
         track.on("unmuted", () => {
-          try {
-            const el2 = track.attach();
-            wrap.innerHTML = "";
-            wrap.appendChild(el2);
-            attachedVideoEl = el2;
-          } catch {}
+          const el = track.attach();
+          wrap.innerHTML = "";
+          wrap.appendChild(el);
+          attachedVideoEl = el;
         });
       }
 
       async function snapAndUpload() {
         if (!attachedVideoEl || !attachedVideoEl.videoWidth || !attachedVideoEl.videoHeight) {
-          status.textContent = "No video frame yet (wait a sec)…";
           return;
         }
 
@@ -79,16 +79,16 @@
         const blob = await new Promise((resolve) =>
           canvas.toBlob(resolve, "image/jpeg", 0.85)
         );
-        if (!blob) throw new Error("failed to create jpeg");
+        if (!blob) return;
 
-        const form = new FormData();
-        form.append("photo", blob, "circuit.jpg");
+        const fd = new FormData();
+        fd.append("photo", blob, "circuit.jpg");
 
-        const up = await fetch("/upload", { method: "POST", body: form });
-        if (!up.ok) throw new Error("upload failed: " + up.status);
-
-        const out = await up.json();
-        status.textContent = `Saved ✓ ${out.savedAs}`;
+        const up = await fetch("/upload", { method: "POST", body: fd });
+        if (up.ok) {
+          status.textContent =
+            "Saved image @ " + new Date().toLocaleTimeString();
+        }
       }
 
       connectBtn.onclick = async () => {
@@ -96,35 +96,28 @@
           status.textContent = "Getting token...";
           const data = await getToken("laptop");
 
-          status.textContent = `Connecting to LiveKit... (${data.url})`;
-
-          // ✅ stability: disable dynacast/adaptiveStream for 1:1 setup
+          status.textContent = "Connecting to LiveKit...";
           room = new Room({ adaptiveStream: false, dynacast: false });
-
           await room.connect(data.url, data.token);
 
           status.textContent = "Waiting for phone video...";
-          snapBtn.disabled = false;
+          connectBtn.disabled = true;
 
           room.on("trackSubscribed", (track) => {
             if (track.kind === "video") {
               attachTrack(track);
               status.textContent = "Video connected ✓";
+
+              if (!timerStarted) {
+                timerStarted = true;
+                setInterval(snapAndUpload, SNAP_EVERY_MS);
+              }
             }
           });
-
-          setInterval(() => {
-            snapAndUpload().catch((e) => (status.textContent = "Snap error: " + e.message));
-          }, SNAP_EVERY_MS);
-
         } catch (e) {
           console.error(e);
-          status.textContent = "Connect failed: " + (e?.message || String(e));
+          status.textContent = "Connect failed: " + e.message;
         }
-      };
-
-      snapBtn.onclick = () => {
-        snapAndUpload().catch((e) => (status.textContent = "Snap error: " + e.message));
       };
     </script>
   </body>
