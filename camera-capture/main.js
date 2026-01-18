@@ -21,9 +21,6 @@ document.getElementById("join").onclick = async () => {
     `http://127.0.0.1:3001/token?room=${encodeURIComponent(
       roomName
     )}&name=${encodeURIComponent(name)}`
-    `http://127.0.0.1:3001/token?room=${encodeURIComponent(
-      roomName
-    )}&name=${encodeURIComponent(name)}`
   );
 
   if (!resp.ok) {
@@ -40,14 +37,10 @@ document.getElementById("join").onclick = async () => {
   room.on("trackSubscribed", (track) => {
     if (track.kind === "audio") {
       track.attach();
-      track.attach();
       log("🔊 subscribed to audio");
     }
   });
 
-  room.on("participantConnected", (p) =>
-    log(`👤 participant connected: ${p.identity}`)
-  );
   room.on("participantConnected", (p) =>
     log(`👤 participant connected: ${p.identity}`)
   );
