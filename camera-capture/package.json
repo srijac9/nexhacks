@@ -1,0 +1,20 @@
+{
+  "name": "camera-capture",
+  "version": "1.0.0",
+  "description": "Phone camera captures circuit images and uploads to laptop",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "livekit-server-sdk": "^2.15.0",
+    "multer": "^2.0.2"
+  }
+}

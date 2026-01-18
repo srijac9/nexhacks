@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Laptop Viewer</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 16px; }
+      #videoWrap video { width: 100%; max-width: 720px; background: #111; border-radius: 12px; }
+      button { padding: 10px 14px; margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <h2>Laptop Viewer + Auto Snapshot</h2>
+    <button id="connect">Connect</button>
+    <button id="snap" disabled>Snap now</button>
+    <p id="status">Idle</p>
+
+    <div id="videoWrap"></div>
+
+    <script type="module">
+      import { Room } from "https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.esm.mjs";
+
+      const status = document.getElementById("status");
+      const connectBtn = document.getElementById("connect");
+      const snapBtn = document.getElementById("snap");
+      const wrap = document.getElementById("videoWrap");
+
+      const SNAP_EVERY_MS = 5 * 60 * 1000; // 5 minutes
+
+      let room;
+      let attachedVideoEl = null;
+
+      async function getToken(identity) {
+        const r = await fetch(`/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`);
+        if (!r.ok) throw new Error("token fetch failed: " + r.status);
+        return r.json();
+      }
+
+      function attachTrack(track) {
+        // remove previous element (if any)
+        if (attachedVideoEl) {
+          attachedVideoEl.remove();
+          attachedVideoEl = null;
+        }
+
+        // attach returns a real <video> element that LiveKit keeps updated
+        attachedVideoEl = track.attach();
+        attachedVideoEl.autoplay = true;
+        attachedVideoEl.playsInline = true;
+        attachedVideoEl.muted = true;
+
+        wrap.innerHTML = "";
+        wrap.appendChild(attachedVideoEl);
+
+        // if network hiccups mute/unmute, re-attach
+        track.on("unmuted", () => {
+          try {
+            const el2 = track.attach();
+            wrap.innerHTML = "";
+            wrap.appendChild(el2);
+            attachedVideoEl = el2;
+          } catch {}
+        });
+      }
+
+      async function snapAndUpload() {
+        if (!attachedVideoEl || !attachedVideoEl.videoWidth || !attachedVideoEl.videoHeight) {
+          status.textContent = "No video frame yet (wait a sec)…";
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = attachedVideoEl.videoWidth;
+        canvas.height = attachedVideoEl.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(attachedVideoEl, 0, 0);
+
+        const blob = await new Promise((resolve) =>
+          canvas.toBlob(resolve, "image/jpeg", 0.85)
+        );
+        if (!blob) throw new Error("failed to create jpeg");
+
+        const form = new FormData();
+        form.append("photo", blob, "circuit.jpg");
+
+        const up = await fetch("/upload", { method: "POST", body: form });
+        if (!up.ok) throw new Error("upload failed: " + up.status);
+
+        const out = await up.json();
+        status.textContent = `Saved ✓ ${out.savedAs}`;
+      }
+
+      connectBtn.onclick = async () => {
+        try {
+          status.textContent = "Getting token...";
+          const data = await getToken("laptop");
+
+          status.textContent = `Connecting to LiveKit... (${data.url})`;
+
+          // ✅ stability: disable dynacast/adaptiveStream for 1:1 setup
+          room = new Room({ adaptiveStream: false, dynacast: false });
+
+          await room.connect(data.url, data.token);
+
+          status.textContent = "Waiting for phone video...";
+          snapBtn.disabled = false;
+
+          room.on("trackSubscribed", (track) => {
+            if (track.kind === "video") {
+              attachTrack(track);
+              status.textContent = "Video connected ✓";
+            }
+          });
+
+          setInterval(() => {
+            snapAndUpload().catch((e) => (status.textContent = "Snap error: " + e.message));
+          }, SNAP_EVERY_MS);
+
+        } catch (e) {
+          console.error(e);
+          status.textContent = "Connect failed: " + (e?.message || String(e));
+        }
+      };
+
+      snapBtn.onclick = () => {
+        snapAndUpload().catch((e) => (status.textContent = "Snap error: " + e.message));
+      };
+    </script>
+  </body>
+</html>

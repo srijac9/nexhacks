@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Phone Publisher</title>
+  </head>
+  <body>
+    <h2>Phone Camera Publisher</h2>
+    <button id="start">Start camera</button>
+    <p id="status">Idle</p>
+
+    <script type="module">
+        import { Room, createLocalVideoTrack } from "https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.esm.mjs";
+
+        const status = document.getElementById("status");
+        const startBtn = document.getElementById("start");
+
+        startBtn.onclick = async () => {
+            try {
+            status.textContent = "Getting token...";
+            const r = await fetch("https://YOUR_PUBLIC_TOKEN_ENDPOINT/token?identity=phone");
+
+            const data = await r.json();
+
+            status.textContent = `Connecting to LiveKit... (${data.url})`;
+            const roomConn = new Room({
+                adaptiveStream: false,
+                dynacast: false,
+            });
+
+            await lkRoom.connect(data.url, data.token);
+
+            status.textContent = "Starting camera...";
+            const track = await createLocalVideoTrack({ facingMode: "environment" });
+            await lkRoom.localParticipant.publishTrack(track);
+
+            status.textContent = `Publishing ✓ Room: ${data.room}`;
+            startBtn.disabled = true;
+            } catch (e) {
+            console.error(e);
+            status.textContent =
+                "LiveKit connect failed: " + (e?.message || String(e));
+            }
+        };
+        </script>
+
+  </body>
+</html>
