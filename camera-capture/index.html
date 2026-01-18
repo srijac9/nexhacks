@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <body>
+    <h2>LiveKit Audio Test</h2>
+
+    <div>
+      <label>LiveKit URL: </label>
+      <input id="url" style="width:520px" value="wss://circuit-builder-he595gpt.livekit.cloud" />
+    </div>
+
+    <div style="margin-top:8px">
+      <label>Room: </label><input id="room" value="nexhacks" />
+      <label style="margin-left:12px">Name: </label><input id="name" value="tab1" />
+    </div>
+
+    <div style="margin-top:12px">
+      <button id="join">Join</button>
+      <button id="mic">Toggle Mic</button>
+    </div>
+
+    <pre id="log" style="margin-top:12px; background:#111; color:#0f0; padding:12px;"></pre>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
