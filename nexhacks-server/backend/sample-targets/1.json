@@ -1,0 +1,54 @@
+{
+    "nodes": [
+      "N1",
+      "N2",
+      "N3"
+    ],
+    "components": [
+      {
+        "id": "V1",
+        "type": "source",
+        "value": "6 V",
+        "pins": [
+          "N1",
+          "N2"
+        ],
+        "polarity": {
+          "positive": "N1",
+          "negative": "N2"
+        }
+      },
+      {
+        "id": "R1",
+        "type": "resistor",
+        "value": "1 k╬⌐",
+        "pins": [
+          "N1",
+          "N2"
+        ]
+      },
+      {
+        "id": "R2",
+        "type": "resistor",
+        "value": "1 k╬⌐",
+        "pins": [
+          "N1",
+          "N3"
+        ]
+      },
+      {
+        "id": "LED1",
+        "type": "led",
+        "value": "",
+        "pins": [
+          "N3",
+          "N2"
+        ],
+        "polarity": {
+          "anode": "N3",
+          "cathode": "N2"
+        }
+      }
+    ],
+    "labels": {}
+  }
