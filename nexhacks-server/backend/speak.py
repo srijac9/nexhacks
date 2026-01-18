@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from livekit_broadcast import send_json_to_room
-from analyze import analyze as run_analyze  # reuse your existing analyze endpoint
+from analyze import load_json, TARGET_PATH, OBSERVED_PATH, llm_analyze
 
 router = APIRouter()
 
@@ -11,29 +11,20 @@ class SpeakRequest(BaseModel):
 
 @router.post("/analyze-and-speak")
 async def analyze_and_speak(req: SpeakRequest):
-    """
-    Runs the existing /analyze logic and sends the result
-    directly into the LiveKit room for the agent to speak.
-    """
     try:
-        # This returns: { "analysis": { ... } }
-        result = await run_analyze()
+        target = load_json(TARGET_PATH)
+        observed = load_json(OBSERVED_PATH)
 
-        # Broadcast exactly what analyze produces
-        await send_json_to_room(
-            room=req.room,
-            payload=result,
-            topic="lk.chat"
-        )
+        analysis = await llm_analyze(target=target, observed=observed)
+        payload = {"analysis": analysis}
 
-        return {
-            "ok": True,
-            "sent_to_room": req.room,
-            "result": result,
-        }
+        await send_json_to_room(req.room, payload, topic="lk.chat")
 
+        return {"ok": True, "sent_to_room": req.room, "result": payload}
+
+    except HTTPException:
+        # if analyze.py raises HTTPException, preserve it
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"analyze-and-speak failed: {type(e).__name__}: {e}"
-        )
+        # ✅ this will show you the real error in /docs instead of plain 500
+        raise HTTPException(status_code=500, detail=f"analyze-and-speak failed: {type(e).__name__}: {e}")

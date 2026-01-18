@@ -16,7 +16,6 @@ def _api_url_https() -> str:
 
     return wss.replace("wss://", "https://").replace("ws://", "http://")
 
-
 async def send_json_to_room(room: str, payload: dict, topic: str = "lk.chat"):
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
