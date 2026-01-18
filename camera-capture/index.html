@@ -1,24 +1,40 @@
 <!doctype html>
 <html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LiveKit Circuit Tutor</title>
+  </head>
+
   <body>
-    <h2>LiveKit Audio Test</h2>
+    <h2>LiveKit Circuit Tutor</h2>
 
     <div>
-      <label>LiveKit URL: </label>
-      <input id="url" style="width:520px" value="wss://circuit-builder-he595gpt.livekit.cloud" />
+      <label>LiveKit URL:</label><br />
+      <input
+        id="url"
+        style="width:520px"
+        value="wss://circuit-builder-he595gpt.livekit.cloud"
+      />
     </div>
 
     <div style="margin-top:8px">
-      <label>Room: </label><input id="room" value="nexhacks" />
-      <label style="margin-left:12px">Name: </label><input id="name" value="tab1" />
+      <label>Room:</label>
+      <input id="room" value="nexhacks" />
+
+      <label style="margin-left:12px">Name:</label>
+      <input id="name" value="tab1" />
     </div>
 
     <div style="margin-top:12px">
       <button id="join">Join</button>
       <button id="mic">Toggle Mic</button>
+      <button id="analyze">Analyze + Speak</button>
     </div>
 
-    <pre id="log" style="margin-top:12px; background:#111; color:#0f0; padding:12px;"></pre>
+    <pre
+      id="log"
+      style="margin-top:12px; background:#111; color:#0f0; padding:12px; height:200px; overflow:auto;"
+    ></pre>
 
     <script type="module" src="./main.js"></script>
   </body>
