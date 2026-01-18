@@ -20,6 +20,18 @@ export default defineConfig(({ mode }) => ({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      '/upload-audio': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
+      '/transcript': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
