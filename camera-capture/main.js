@@ -11,9 +11,10 @@ document.getElementById("join").onclick = async () => {
   const roomName = document.getElementById("room").value.trim();
   const name = document.getElementById("name").value.trim();
 
-  // Get token from your Python token server
   const resp = await fetch(
-    `http://127.0.0.1:3001/token?room=${encodeURIComponent(roomName)}&name=${encodeURIComponent(name)}`
+    `http://127.0.0.1:3001/token?room=${encodeURIComponent(
+      roomName
+    )}&name=${encodeURIComponent(name)}`
   );
   const { token } = await resp.json();
 
@@ -22,12 +23,14 @@ document.getElementById("join").onclick = async () => {
 
   room.on("trackSubscribed", (track) => {
     if (track.kind === "audio") {
-      track.attach(); // creates an <audio> element and plays it
+      track.attach();
       log("🔊 subscribed to audio");
     }
   });
 
-  room.on("participantConnected", (p) => log(`👤 participant connected: ${p.identity}`));
+  room.on("participantConnected", (p) =>
+    log(`👤 participant connected: ${p.identity}`)
+  );
 
   await room.connect(url, token);
   log("✅ connected");
@@ -45,4 +48,24 @@ document.getElementById("mic").onclick = async () => {
     micTrack = undefined;
     log("🛑 mic stopped (refresh if needed)");
   }
+};
+
+document.getElementById("analyze").onclick = async () => {
+  if (!room) return log("join first");
+
+  const roomName = document.getElementById("room").value.trim();
+  log("🧠 requesting analysis...");
+
+  const r = await fetch("http://127.0.0.1:8000/analyze-and-speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ room: roomName }),
+  });
+
+  if (!r.ok) {
+    const t = await r.text();
+    return log("❌ analyze failed: " + t);
+  }
+
+  log("✅ analysis sent (agent should speak)");
 };
