@@ -1,74 +1,85 @@
 import json
+import asyncio
 
-from livekit import agents
-from livekit.agents import AgentSession, Agent
-from livekit.agents.voice import room_io
+from livekit import agents, rtc
+from livekit.agents.voice import AgentSession, Agent
 
-# Turn your JSON into something speakable
-def verbalize(a: dict) -> str:
+
+def json_to_speech(payload: dict) -> str:
+    a = payload.get("analysis", payload)
+
     parts = []
 
-    aff = (a.get("affirmations") or [])[:2]
+    aff = a.get("affirmations") or []
     if aff:
-        parts.append("Nice work. " + " ".join(aff))
+        parts.append("Good news. " + " ".join(aff[:2]))
 
     issues = a.get("issues") or []
-    if not issues:
-        parts.append("I don’t see any wiring issues.")
-    else:
+    if issues:
+        # danger first
         order = {"danger": 0, "warn": 1, "info": 2}
         issues = sorted(issues, key=lambda x: order.get(x.get("severity"), 9))
         parts.append(f"I found {len(issues)} issue" + ("" if len(issues) == 1 else "s") + ".")
-        for i in issues:
-            msg = f"{i.get('id','Item')}. {i.get('observed','')} It should be: {i.get('expected','')}."
-            if i.get("fix"):
-                msg += " " + i["fix"]
-            parts.append(msg)
+        for it in issues[:4]:
+            name = it.get("id", "item")
+            observed = it.get("observed", "")
+            expected = it.get("expected", "")
+            fix = it.get("fix", "")
+            parts.append(f"{name}. {observed} It should be: {expected} Fix: {fix}")
+    else:
+        parts.append("I don’t see any wiring issues.")
 
-    steps = (a.get("next_steps") or [])[:3]
+    steps = a.get("next_steps") or []
     if steps:
-        parts.append("Next steps: " + " Then, ".join(steps) + ".")
+        parts.append("Next steps: " + " Then, ".join(steps[:3]) + ".")
 
-    q = (a.get("questions") or [])
-    if q:
-        parts.append(q[0])
+    qs = a.get("questions") or []
+    if qs:
+        parts.append("Quick question: " + qs[0])
 
-    return " ".join(parts)
+    return " ".join(parts).strip()
 
-def on_text(session: AgentSession, event: room_io.TextInputEvent) -> None:
-    try:
-        payload = json.loads(event.text)
-        analysis = payload.get("analysis", payload)
-        text = verbalize(analysis)
-    except Exception:
-        text = "I got a message, but it wasn’t valid JSON. Send the analysis JSON and I’ll read it aloud."
-
-    session.say(text, allow_interruptions=True)
 
 async def entrypoint(ctx: agents.JobContext):
-    # Connect the agent to the LiveKit room
+    print("🚀 entrypoint called", flush=True)
     await ctx.connect()
+    print("✅ connected to room:", ctx.room.name, flush=True)
 
-    # LiveKit Inference TTS: pick any supported TTS descriptor.
-    # This Cartesia model string is straight from LiveKit docs.
+    # LiveKit Inference TTS descriptor (no OpenAI)
     session = AgentSession(
         tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
     )
 
-    await session.start(
-        room=ctx.room,
-        agent=Agent(instructions="You read circuit feedback aloud."),
-        room_options=room_io.RoomOptions(
-            text_input=room_io.TextInputOptions(text_input_cb=on_text),
-            audio_input=False,
-        ),
-    )
+    agent = Agent(instructions="Speak concise circuit feedback clearly.")
+
+    # Start session (no room_io options)
+    await session.start(room=ctx.room, agent=agent)
 
     await session.say("Voice agent online. Send circuit JSON and I will read it.", allow_interruptions=False)
 
+    async def handle_text(reader: rtc.TextStreamReader, _info):
+        try:
+            text = await reader.read_all()
+            try:
+                payload = json.loads(text)
+                spoken = json_to_speech(payload)
+            except Exception:
+                spoken = text  # if they sent plain text
+
+            print("🗣️ speaking:", spoken[:120], "..." if len(spoken) > 120 else "", flush=True)
+            await session.say(spoken, allow_interruptions=True)
+        except Exception as e:
+            print("❌ text handler error:", e, flush=True)
+
+    # Listen for JS sendText(..., {topic:"lk.chat"})
+    ctx.room.register_text_stream_handler("lk.chat", handle_text)
+    print("👂 listening on topic lk.chat", flush=True)
+
+    while True:
+        await asyncio.sleep(1)
+
+
 if __name__ == "__main__":
     agents.cli.run_app(
-        agents.WorkerOptions(
-            entrypoint_fnc=entrypoint,
-        )
+        agents.WorkerOptions(entrypoint_fnc=entrypoint)
     )
