@@ -18,6 +18,7 @@ document.getElementById("join").onclick = async () => {
   const { token } = await resp.json();
 
   room = new Room();
+  window.room = room;
 
   room.on("trackSubscribed", (track) => {
     if (track.kind === "audio") {

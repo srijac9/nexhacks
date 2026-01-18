@@ -16,7 +16,6 @@ def json_to_speech(payload: dict) -> str:
 
     issues = a.get("issues") or []
     if issues:
-        # danger first
         order = {"danger": 0, "warn": 1, "info": 2}
         issues = sorted(issues, key=lambda x: order.get(x.get("severity"), 9))
         parts.append(f"I found {len(issues)} issue" + ("" if len(issues) == 1 else "s") + ".")
@@ -37,7 +36,7 @@ def json_to_speech(payload: dict) -> str:
     if qs:
         parts.append("Quick question: " + qs[0])
 
-    return " ".join(parts).strip()
+    return " ".join(parts).strip() or "I received an update, but it was empty."
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -51,29 +50,39 @@ async def entrypoint(ctx: agents.JobContext):
     )
 
     agent = Agent(instructions="Speak concise circuit feedback clearly.")
-
-    # Start session (no room_io options)
     await session.start(room=ctx.room, agent=agent)
 
-    await session.say("Voice agent online. Send circuit JSON and I will read it.", allow_interruptions=False)
-
-    async def handle_text(reader: rtc.TextStreamReader, _info):
+    async def safe_say(text: str):
         try:
-            text = await reader.read_all()
-            try:
-                payload = json.loads(text)
-                spoken = json_to_speech(payload)
-            except Exception:
-                spoken = text  # if they sent plain text
-
-            print("🗣️ speaking:", spoken[:120], "..." if len(spoken) > 120 else "", flush=True)
-            await session.say(spoken, allow_interruptions=True)
+            print("🗣️ speaking:", text[:140], "..." if len(text) > 140 else "", flush=True)
+            await session.say(text, allow_interruptions=True)
+            print("✅ finished speaking", flush=True)
         except Exception as e:
-            print("❌ text handler error:", e, flush=True)
+            print("❌ say failed:", e, flush=True)
 
-    # Listen for JS sendText(..., {topic:"lk.chat"})
-    ctx.room.register_text_stream_handler("lk.chat", handle_text)
-    print("👂 listening on topic lk.chat", flush=True)
+    # ✅ This matches JS: localParticipant.sendText(..., { topic: "lk.chat" })
+    @ctx.room.on("data_received")
+    def _on_data(pkt: rtc.DataPacket):
+        try:
+            topic = getattr(pkt, "topic", None)
+            raw = pkt.data.decode("utf-8", errors="ignore")
+            print(f"📩 data_received topic={topic!r} bytes={len(pkt.data)} text={raw[:120]!r}", flush=True)
+
+            # if it's our chat topic, speak it
+            if topic == "lk.chat":
+                try:
+                    payload = json.loads(raw)
+                    spoken = json_to_speech(payload)
+                except Exception:
+                    spoken = raw
+
+                asyncio.create_task(safe_say(spoken))
+        except Exception as e:
+            print("❌ data handler error:", e, flush=True)
+
+
+    # optional: speak once on startup
+    await safe_say("Voice agent online. Send circuit JSON and I will read it.")
 
     while True:
         await asyncio.sleep(1)
