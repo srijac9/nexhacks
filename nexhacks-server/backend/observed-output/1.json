@@ -1,28 +1,23 @@
 {
-  "components": {
-    "wire_1": [
-      "B8",
-      "D21"
-    ],
-    "resistor_1": [
-      "H24",
-      "J26"
-    ],
-    "led_1": [
-      "H30",
-      "H28"
-    ],
-    "wire_2": [
-      "D28",
-      "D24"
-    ],
-    "wire_3": [
-      "A8",
-      "E21"
-    ],
-    "resistor_2": [
-      "H21",
-      "H20"
-    ]
-  }
+  "node_1": [
+    "power_red_1",
+    "resistor_1",
+    "resistor_2"
+  ],
+  "node_2": [
+    "resistor_1",
+    "led_1"
+  ],
+  "node_3": [
+    "resistor_2",
+    "wire_black_1"
+  ],
+  "node_4": [
+    "led_1",
+    "wire_black_1"
+  ],
+  "node_5": [
+    "wire_black_1",
+    "power_black_1"
+  ]
 }
