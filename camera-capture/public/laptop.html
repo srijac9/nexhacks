@@ -33,12 +33,17 @@
 
       const SNAP_EVERY_MS = 30 * 1000; // 30 seconds
 
+      // ✅ IMPORTANT: your token/upload server is on 3000, but this page is on 8080
+      const API_BASE = "http://localhost:3000";
+
       let room;
       let attachedVideoEl = null;
       let timerStarted = false;
 
       async function getToken(identity) {
-        const r = await fetch(`/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`);
+        const r = await fetch(
+          `${API_BASE}/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`
+        );
         if (!r.ok) throw new Error("token fetch failed: " + r.status);
         return r.json();
       }
@@ -56,6 +61,11 @@
 
         wrap.innerHTML = "";
         wrap.appendChild(attachedVideoEl);
+
+        // Debug: confirm we are receiving frames
+        setTimeout(() => {
+          console.log("video size:", attachedVideoEl.videoWidth, attachedVideoEl.videoHeight);
+        }, 1500);
 
         track.on("unmuted", () => {
           const el = track.attach();
@@ -84,10 +94,11 @@
         const fd = new FormData();
         fd.append("photo", blob, "circuit.jpg");
 
-        const up = await fetch("/upload", { method: "POST", body: fd });
+        const up = await fetch(`${API_BASE}/upload-latest`, { method: "POST", body: fd });
         if (up.ok) {
-          status.textContent =
-            "Saved image @ " + new Date().toLocaleTimeString();
+          status.textContent = "Saved image @ " + new Date().toLocaleTimeString();
+        } else {
+          status.textContent = "Upload failed: " + up.status;
         }
       }
 
@@ -116,7 +127,7 @@
           });
         } catch (e) {
           console.error(e);
-          status.textContent = "Connect failed: " + e.message;
+          status.textContent = "Connect failed: " + (e?.message || String(e));
         }
       };
     </script>

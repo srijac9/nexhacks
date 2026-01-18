@@ -1,7 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Room, type Track } from 'livekit-client';
-import { Video, X, Maximize2, Minimize2 } from 'lucide-react';
-import CircuitButton from '@/components/CircuitButton';
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Room,
+  type Track,
+  type RemoteParticipant,
+  type RemoteTrackPublication,
+} from "livekit-client";
+import { Video, X, Maximize2, Minimize2 } from "lucide-react";
+import CircuitButton from "@/components/CircuitButton";
 
 interface PhoneVideoFeedProps {
   isOpen: boolean;
@@ -10,494 +15,207 @@ interface PhoneVideoFeedProps {
   isExpanded?: boolean;
 }
 
-const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: PhoneVideoFeedProps) => {
-  const [status, setStatus] = useState('Idle');
-  const [room, setRoom] = useState<Room | null>(null);
-  const [attachedVideoEl, setAttachedVideoEl] = useState<HTMLVideoElement | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>('');
-  const videoRef = useRef<HTMLDivElement>(null);
+const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE?.trim?.() || "http://localhost:3000";
 
-  const getToken = async (identity: string) => {
-    const tokenUrl = `/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`;
-    console.log('[PhoneVideoFeed] Fetching token from:', tokenUrl);
-    const response = await fetch(tokenUrl);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[PhoneVideoFeed] Token fetch failed:', response.status, errorText);
-      throw new Error(`Token fetch failed: ${response.status} - ${errorText}`);
+export default function PhoneVideoFeed({
+  isOpen,
+  onClose,
+  onExpand,
+  isExpanded = false,
+}: PhoneVideoFeedProps) {
+  const [status, setStatus] = useState("Idle");
+  const [debugInfo, setDebugInfo] = useState("");
+  const [isVideoAttached, setIsVideoAttached] = useState(false);
+
+  const roomRef = useRef<Room | null>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+
+  const attachedTrackRef = useRef<Track | null>(null);
+
+  const getToken = useCallback(async (identity: string) => {
+    const tokenUrl = `${API_BASE}/token?identity=${encodeURIComponent(
+      identity
+    )}&t=${Date.now()}`;
+    console.log("[PhoneVideoFeed] Fetching token from:", tokenUrl);
+
+    const res = await fetch(tokenUrl);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Token fetch failed: ${res.status} - ${text}`);
     }
-    const data = await response.json();
-    console.log('[PhoneVideoFeed] Token response:', {
-      url: data.url,
-      room: data.room,
-      hasToken: !!data.token,
-      tokenPreview: data.token?.substring(0, 20) + '...'
-    });
-    return data;
-  };
-
-  const attachTrack = useCallback((track: Track) => {
-    console.log('[PhoneVideoFeed] Attaching track:', track.kind, track.sid, 'muted:', track.isMuted);
-    
-    // Clean up previous video element safely
-    setAttachedVideoEl((prevEl) => {
-      if (prevEl) {
-        try {
-          // Detach the track from the previous element
-          if (track.detach) {
-            track.detach(prevEl);
-          }
-          // Remove from DOM if it has a parent
-          if (prevEl.parentNode) {
-            prevEl.parentNode.removeChild(prevEl);
-          }
-        } catch (e) {
-          console.warn('[PhoneVideoFeed] Error cleaning up previous video element:', e);
-        }
-      }
-      return null;
-    });
-
-    // Clear the container safely
-    if (videoRef.current) {
-      try {
-        // Remove all children
-        while (videoRef.current.firstChild) {
-          videoRef.current.removeChild(videoRef.current.firstChild);
-        }
-      } catch (e) {
-        console.warn('[PhoneVideoFeed] Error clearing container:', e);
-        videoRef.current.innerHTML = '';
-      }
-    }
-
-    // Attach the new track
-    let videoElement: HTMLVideoElement;
-    try {
-      videoElement = track.attach();
-      videoElement.autoplay = true;
-      videoElement.playsInline = true;
-      videoElement.muted = true;
-      videoElement.className = 'w-full h-full object-contain rounded-lg';
-      videoElement.style.width = '100%';
-      videoElement.style.height = '100%';
-      videoElement.style.display = 'block';
-
-      if (videoRef.current) {
-        videoRef.current.appendChild(videoElement);
-      }
-
-      setAttachedVideoEl(videoElement);
-
-      // Handle play errors
-      const playPromise = videoElement.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          // Ignore AbortError - it's common when video is removed/replaced
-          if (err.name !== 'AbortError') {
-            console.error('[PhoneVideoFeed] Video play error:', err);
-          }
-        });
-      }
-    } catch (e) {
-      console.error('[PhoneVideoFeed] Error attaching track:', e);
-      return;
-    }
-
-    // Handle track events
-    track.on('unmuted', () => {
-      console.log('[PhoneVideoFeed] Track unmuted');
-      if (videoElement && videoRef.current) {
-        // Ensure video is in the container
-        if (videoElement.parentNode !== videoRef.current) {
-          try {
-            if (videoElement.parentNode) {
-              videoElement.parentNode.removeChild(videoElement);
-            }
-            videoRef.current.appendChild(videoElement);
-          } catch (e) {
-            console.warn('[PhoneVideoFeed] Error reattaching video on unmute:', e);
-          }
-        }
-        videoElement.play().catch((err) => {
-          if (err.name !== 'AbortError') {
-            console.error('[PhoneVideoFeed] Video play error on unmute:', err);
-          }
-        });
-      }
-    });
-
-    track.on('muted', () => {
-      console.log('[PhoneVideoFeed] Track muted');
-    });
-
-    track.on('ended', () => {
-      console.log('[PhoneVideoFeed] Track ended');
-      setStatus('Video track ended');
-    });
-
-    track.on('subscribed', () => {
-      console.log('[PhoneVideoFeed] Track subscribed');
-    });
-
-    track.on('unsubscribed', () => {
-      console.log('[PhoneVideoFeed] Track unsubscribed');
-      // Clean up when track is unsubscribed
-      if (videoElement && videoElement.parentNode) {
-        try {
-          videoElement.parentNode.removeChild(videoElement);
-        } catch (e) {
-          // Ignore errors if already removed
-        }
-      }
-      setAttachedVideoEl(null);
-    });
+    return (await res.json()) as { token: string; url: string; room: string };
   }, []);
 
-  const handleConnect = useCallback(async () => {
+  const detachCurrent = useCallback(() => {
+    const el = videoElRef.current;
+    const t = attachedTrackRef.current;
     try {
-      setStatus('Getting token...');
-      console.log('[PhoneVideoFeed] Requesting token for identity: laptop');
-      const data = await getToken('laptop');
-      console.log('[PhoneVideoFeed] Token received:', {
-        url: data.url,
-        room: data.room,
-        hasToken: !!data.token,
-        tokenLength: data.token?.length
-      });
-
-      setStatus('Connecting to LiveKit...');
-      console.log('[PhoneVideoFeed] Creating Room instance');
-      const roomConn = new Room({ adaptiveStream: false, dynacast: false });
-      
-      console.log('[PhoneVideoFeed] Connecting to:', data.url);
-      await roomConn.connect(data.url, data.token);
-      console.log('[PhoneVideoFeed] Connected to room:', roomConn.name);
-      console.log('[PhoneVideoFeed] Local participant:', roomConn.localParticipant.identity);
-      
-      const debugMsg = `Room: ${roomConn.name}, Local: ${roomConn.localParticipant.identity}, Remote: ${roomConn.remoteParticipants.size}`;
-      setDebugInfo(debugMsg);
-      console.log('[PhoneVideoFeed]', debugMsg);
-
-      setStatus('Waiting for phone video...');
-
-      // Log all remote participants
-      console.log('[PhoneVideoFeed] Remote participants count:', roomConn.remoteParticipants.size);
-      roomConn.remoteParticipants.forEach((participant) => {
-        console.log('[PhoneVideoFeed] Remote participant:', {
-          identity: participant.identity,
-          sid: participant.sid,
-          trackPublications: participant.trackPublications.size
-        });
-      });
-
-      // Handle new track subscriptions
-      roomConn.on('trackSubscribed', (track, publication, participant) => {
-        console.log('[PhoneVideoFeed] Track subscribed:', {
-          kind: track.kind,
-          sid: track.sid,
-          participantIdentity: participant.identity,
-          participantSid: participant.sid,
-          publicationKind: publication.kind,
-          isMuted: track.isMuted,
-          isSubscribed: publication.isSubscribed
-        });
-        
-        if (track.kind === 'video') {
-          console.log('[PhoneVideoFeed] Attaching video track from:', participant.identity);
-          attachTrack(track);
-          setStatus('Video connected ✓');
-        }
-      });
-
-      // Handle track unsubscribed
-      roomConn.on('trackUnsubscribed', (track, publication, participant) => {
-        console.log('[PhoneVideoFeed] Track unsubscribed:', {
-          kind: track.kind,
-          participantIdentity: participant.identity,
-          trackSid: track.sid,
-          publicationKind: publication.kind
-        });
-        
-        if (track.kind === 'video') {
-          // Don't immediately clean up - the track might be republished
-          // Just update status and wait a moment
-          setStatus('Video disconnected, waiting for reconnection...');
-          
-          // Check if there are other video tracks available
-          setTimeout(() => {
-            if (roomConn && roomConn.remoteParticipants.size > 0) {
-              roomConn.remoteParticipants.forEach((p) => {
-                p.trackPublications.forEach((pub) => {
-                  if (pub.kind === 'video' && pub.track) {
-                    console.log('[PhoneVideoFeed] Found video track after unsubscribe, reattaching...');
-                    attachTrack(pub.track);
-                    setStatus('Video reconnected ✓');
-                  } else if (pub.kind === 'video' && !pub.isSubscribed) {
-                    console.log('[PhoneVideoFeed] Resubscribing to video track...');
-                    pub.setSubscribed(true);
-                  }
-                });
-              });
-            }
-          }, 500);
-        }
-      });
-
-      // Check for existing participants and their tracks
-      roomConn.remoteParticipants.forEach((participant) => {
-        console.log('[PhoneVideoFeed] Checking existing participant:', participant.identity);
-        console.log('[PhoneVideoFeed] Track publications:', participant.trackPublications.size);
-        
-        participant.trackPublications.forEach((publication) => {
-          console.log('[PhoneVideoFeed] Publication:', {
-            kind: publication.kind,
-            trackSid: publication.trackSid,
-            isSubscribed: publication.isSubscribed,
-            hasTrack: !!publication.track,
-            isMuted: publication.isMuted
-          });
-          
-          // Always try to subscribe to video tracks
-          if (publication.kind === 'video') {
-            if (!publication.isSubscribed) {
-              console.log('[PhoneVideoFeed] Subscribing to video publication from:', participant.identity);
-              publication.setSubscribed(true);
-            }
-            
-            if (publication.track) {
-              console.log('[PhoneVideoFeed] Found existing video track from', participant.identity);
-              attachTrack(publication.track);
-              setStatus('Video connected ✓');
-            } else {
-              console.log('[PhoneVideoFeed] Video publication exists but track not available yet, waiting for trackSubscribed event...');
-            }
-          }
-        });
-      });
-
-      // Handle new participants joining
-      roomConn.on('participantConnected', (participant) => {
-        console.log('[PhoneVideoFeed] New participant connected:', {
-          identity: participant.identity,
-          sid: participant.sid,
-          trackPublications: participant.trackPublications.size
-        });
-        
-        participant.trackPublications.forEach((publication) => {
-          console.log('[PhoneVideoFeed] New participant publication:', {
-            kind: publication.kind,
-            isSubscribed: publication.isSubscribed,
-            hasTrack: !!publication.track
-          });
-          
-          // Subscribe to video tracks
-          if (publication.kind === 'video') {
-            if (!publication.isSubscribed) {
-              console.log('[PhoneVideoFeed] Subscribing to video publication from:', participant.identity);
-              publication.setSubscribed(true);
-            }
-            
-            if (publication.track) {
-              console.log('[PhoneVideoFeed] Video track from new participant:', participant.identity);
-              attachTrack(publication.track);
-              setStatus('Video connected ✓');
-            }
-          }
-        });
-      });
-
-      // Handle participant disconnected
-      roomConn.on('participantDisconnected', (participant) => {
-        console.log('[PhoneVideoFeed] Participant disconnected:', participant.identity);
-        
-        // Clean up video if this was the phone
-        if (participant.identity === 'phone') {
-          setAttachedVideoEl((prevEl) => {
-            if (prevEl) {
-              try {
-                if (prevEl.parentNode) {
-                  prevEl.parentNode.removeChild(prevEl);
-                }
-              } catch (e) {
-                // Ignore
-              }
-            }
-            return null;
-          });
-          
-          if (videoRef.current) {
-            try {
-              while (videoRef.current.firstChild) {
-                videoRef.current.removeChild(videoRef.current.firstChild);
-              }
-            } catch (e) {
-              videoRef.current.innerHTML = '';
-            }
-          }
-        }
-        
-        setStatus('Phone disconnected');
-      });
-
-      // Handle track published
-      roomConn.on('trackPublished', (publication, participant) => {
-        console.log('[PhoneVideoFeed] Track published:', {
-          kind: publication.kind,
-          participantIdentity: participant.identity,
-          trackSid: publication.trackSid,
-          isSubscribed: publication.isSubscribed
-        });
-        
-        if (publication.kind === 'video') {
-          console.log('[PhoneVideoFeed] Video track published, subscribing...');
-          // Subscribe to the track
-          publication.setSubscribed(true);
-          
-          // If track is already available, attach it immediately
-          if (publication.track) {
-            console.log('[PhoneVideoFeed] Track already available, attaching...');
-            attachTrack(publication.track);
-            setStatus('Video connected ✓');
-          }
-        }
-      });
-
-      // Handle track unpublished
-      roomConn.on('trackUnpublished', (publication, participant) => {
-        console.log('[PhoneVideoFeed] Track unpublished:', publication.kind, 'from', participant.identity);
-      });
-
-      // Set up periodic check for video tracks (in case they get unsubscribed)
-      const trackCheckInterval = setInterval(() => {
-        if (roomConn && roomConn.state === 'connected') {
-          let hasVideoTrack = false;
-          roomConn.remoteParticipants.forEach((participant) => {
-            participant.trackPublications.forEach((publication) => {
-              if (publication.kind === 'video') {
-                if (!publication.isSubscribed) {
-                  console.log('[PhoneVideoFeed] Periodic check: Resubscribing to video track');
-                  publication.setSubscribed(true);
-                }
-                if (publication.track && !attachedVideoEl) {
-                  console.log('[PhoneVideoFeed] Periodic check: Found video track, attaching');
-                  attachTrack(publication.track);
-                  setStatus('Video connected ✓');
-                  hasVideoTrack = true;
-                } else if (publication.track) {
-                  hasVideoTrack = true;
-                }
-              }
-            });
-          });
-          
-          if (!hasVideoTrack && attachedVideoEl) {
-            console.log('[PhoneVideoFeed] Periodic check: No video track found but element exists');
-          }
-        }
-      }, 2000); // Check every 2 seconds
-
-      // Store interval ID for cleanup
-      (roomConn as any)._trackCheckInterval = trackCheckInterval;
-
-      setRoom(roomConn);
-    } catch (e: any) {
-      console.error('[PhoneVideoFeed] Connection error:', e);
-      setStatus(`Connect failed: ${e.message}`);
+      if (t && el) {
+        // detach ONLY from our known element
+        (t as any).detach?.(el);
+      }
+    } catch (e) {
+      console.warn("[PhoneVideoFeed] detach warning:", e);
     }
-  }, [attachTrack, attachedVideoEl]);
+    attachedTrackRef.current = null;
+    setIsVideoAttached(false);
 
-  const handleDisconnect = useCallback(() => {
-    if (room) {
-      // Clear track check interval
-      if ((room as any)._trackCheckInterval) {
-        clearInterval((room as any)._trackCheckInterval);
+    // stop showing old frozen frame
+    if (el) {
+      try {
+        el.srcObject = null;
+      } catch {}
+    }
+  }, []);
+
+  const attachTrackToVideo = useCallback(
+    (track: Track, from?: string) => {
+      if (track.kind !== "video") return;
+
+      const el = videoElRef.current;
+      if (!el) {
+        console.warn("[PhoneVideoFeed] video element not ready yet");
+        return;
       }
 
-      // Clean up video element before disconnecting
-      setAttachedVideoEl((prevEl) => {
-        if (prevEl) {
-          try {
-            if (prevEl.parentNode) {
-              prevEl.parentNode.removeChild(prevEl);
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-        }
-        return null;
-      });
+      console.log(
+        "[PhoneVideoFeed] Attaching video track",
+        (track as any).sid,
+        "from",
+        from
+      );
 
-      // Clear container
-      if (videoRef.current) {
-        try {
-          while (videoRef.current.firstChild) {
-            videoRef.current.removeChild(videoRef.current.firstChild);
-          }
-        } catch (e) {
-          videoRef.current.innerHTML = '';
+      // Detach any previous track from THIS element
+      detachCurrent();
+
+      try {
+        // Attach track to our <video> element (React-owned)
+        (track as any).attach(el);
+        attachedTrackRef.current = track;
+        setIsVideoAttached(true);
+
+        // Try to play
+        const p = el.play();
+        if (p && typeof (p as any).catch === "function") {
+          p.catch((err: any) => {
+            if (err?.name !== "AbortError") {
+              console.warn("[PhoneVideoFeed] video.play() failed:", err);
+            }
+          });
         }
+
+        el.onloadedmetadata = () => {
+          console.log(
+            "[PhoneVideoFeed] loadedmetadata:",
+            el.videoWidth,
+            el.videoHeight
+          );
+        };
+      } catch (e) {
+        console.error("[PhoneVideoFeed] attach failed:", e);
+        setStatus("Failed to attach video");
       }
 
-      room.disconnect();
-      setRoom(null);
-      setStatus('Disconnected');
-    }
-  }, [room]);
+      track.on("muted", () => setStatus("Video muted (network hiccup)…"));
+      track.on("unmuted", () => {
+        setStatus("Video resumed ✓");
+        videoElRef.current?.play().catch(() => {});
+      });
+      track.on("ended", () => {
+        setStatus("Video ended");
+        detachCurrent();
+      });
+    },
+    [detachCurrent]
+  );
 
-  // Auto-connect when modal opens
-  useEffect(() => {
-    if (isOpen && !room) {
-      console.log('[PhoneVideoFeed] Modal opened, connecting...');
-      handleConnect();
-    } else if (isOpen && room) {
-      console.log('[PhoneVideoFeed] Modal opened, already connected');
-    }
-  }, [isOpen, room, handleConnect]);
+  const subscribeExisting = useCallback(
+    (room: Room) => {
+      room.remoteParticipants.forEach((p: RemoteParticipant) => {
+        p.trackPublications.forEach((pub: RemoteTrackPublication) => {
+          if (pub.kind === "video") {
+            if (!pub.isSubscribed) pub.setSubscribed(true);
+            if (pub.track) {
+              attachTrackToVideo(pub.track, p.identity);
+              setStatus("Video connected ✓");
+            }
+          }
+        });
+      });
+    },
+    [attachTrackToVideo]
+  );
 
-  // Cleanup on close
-  useEffect(() => {
-    if (!isOpen && room) {
-      handleDisconnect();
-    }
-  }, [isOpen, room, handleDisconnect]);
+  const connect = useCallback(async () => {
+    if (roomRef.current?.state === "connected") return;
 
-  // Cleanup on unmount
+    setStatus("Getting token...");
+    const data = await getToken("laptop");
+
+    setStatus("Connecting to LiveKit...");
+    const room = new Room({
+      adaptiveStream: false,
+      dynacast: false,
+    });
+
+    await room.connect(data.url, data.token);
+    roomRef.current = room;
+
+    setDebugInfo(
+      `Room: ${room.name}, Local: ${room.localParticipant.identity}, Remote: ${room.remoteParticipants.size}`
+    );
+
+    setStatus("Waiting for phone video...");
+
+    room.on("trackSubscribed", (track, _pub, participant) => {
+      console.log("[PhoneVideoFeed] trackSubscribed", track.kind, participant.identity);
+      if (track.kind === "video") {
+        attachTrackToVideo(track, participant.identity);
+        setStatus("Video connected ✓");
+      }
+    });
+
+    room.on("trackUnsubscribed", (track, _pub, participant) => {
+      console.log("[PhoneVideoFeed] trackUnsubscribed", track.kind, participant.identity);
+      if (track.kind === "video") {
+        setStatus("Video disconnected, waiting...");
+        detachCurrent();
+      }
+    });
+
+    room.on("participantDisconnected", (p) => {
+      if (p.identity === "phone") {
+        setStatus("Phone disconnected");
+        detachCurrent();
+      }
+    });
+
+    // In case phone was already publishing before we connected:
+    subscribeExisting(room);
+  }, [getToken, attachTrackToVideo, detachCurrent, subscribeExisting]);
+
+  const disconnect = useCallback(() => {
+    detachCurrent();
+    roomRef.current?.disconnect();
+    roomRef.current = null;
+    setStatus("Disconnected");
+  }, [detachCurrent]);
+
   useEffect(() => {
+    if (!isOpen) return;
+    connect().catch((e) => setStatus(`Connect failed: ${e?.message || String(e)}`));
     return () => {
-      // Clean up video element
-      setAttachedVideoEl((prevEl) => {
-        if (prevEl) {
-          try {
-            if (prevEl.parentNode) {
-              prevEl.parentNode.removeChild(prevEl);
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-        }
-        return null;
-      });
-
-      // Clean up room connection
-      if (room) {
-        try {
-          room.disconnect();
-        } catch (e) {
-          console.warn('[PhoneVideoFeed] Error disconnecting on unmount:', e);
-        }
-      }
+      disconnect();
     };
-  }, [room]);
+  }, [isOpen, connect, disconnect]);
 
   if (!isOpen) return null;
 
   return (
     <div
       className={`fixed z-50 transition-all duration-300 ${
-        isExpanded
-          ? 'inset-4'
-          : 'bottom-4 right-4 w-96'
+        isExpanded ? "inset-4" : "bottom-4 right-4 w-96"
       }`}
     >
       <div className="bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-lg h-full flex flex-col">
@@ -526,7 +244,7 @@ const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: Phone
               variant="ghost"
               size="sm"
               onClick={() => {
-                handleDisconnect();
+                disconnect();
                 onClose();
               }}
               className="h-8 w-8 p-0"
@@ -548,16 +266,23 @@ const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: Phone
           )}
         </div>
 
-        {/* Video Container */}
+        {/* Video */}
         <div className="flex-1 p-4 overflow-hidden flex items-center justify-center">
           <div
-            ref={videoRef}
             className={`w-full h-full min-h-[200px] bg-card/30 border-2 border-dashed border-border rounded-lg flex items-center justify-center ${
-              attachedVideoEl ? 'border-solid' : ''
+              isVideoAttached ? "border-solid" : ""
             }`}
-            style={{ aspectRatio: '16/9' }}
+            style={{ aspectRatio: "16/9" }}
           >
-            {!attachedVideoEl && (
+            <video
+              ref={videoElRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-contain rounded-lg"
+              style={{ display: isVideoAttached ? "block" : "none" }}
+            />
+            {!isVideoAttached && (
               <div className="text-center p-4">
                 <Video className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                 <p className="text-muted-foreground font-mono text-xs">
@@ -570,44 +295,23 @@ const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: Phone
 
         {/* Controls */}
         <div className="p-4 border-t border-border space-y-2">
-          {room ? (
+          {roomRef.current ? (
             <>
               <CircuitButton
                 onClick={() => {
-                  // Manual refresh - check for tracks
-                  console.log('[PhoneVideoFeed] Manual refresh triggered');
-                  if (room) {
-                    console.log('[PhoneVideoFeed] Remote participants:', room.remoteParticipants.size);
-                    room.remoteParticipants.forEach((participant) => {
-                      console.log('[PhoneVideoFeed] Participant:', participant.identity, 'Tracks:', participant.trackPublications.size);
-                      participant.trackPublications.forEach((publication) => {
-                        if (publication.kind === 'video') {
-                          console.log('[PhoneVideoFeed] Video publication:', {
-                            isSubscribed: publication.isSubscribed,
-                            hasTrack: !!publication.track,
-                            trackSid: publication.trackSid
-                          });
-                          if (!publication.isSubscribed) {
-                            publication.setSubscribed(true);
-                          }
-                          if (publication.track) {
-                            attachTrack(publication.track);
-                          }
-                        }
-                      });
-                    });
-                    const debugMsg = `Room: ${room.name}, Remote: ${room.remoteParticipants.size}`;
-                    setDebugInfo(debugMsg);
-                  }
+                  const r = roomRef.current;
+                  if (!r) return;
+                  subscribeExisting(r);
+                  setDebugInfo(`Room: ${r.name}, Remote: ${r.remoteParticipants.size}`);
                 }}
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="w-full"
               >
                 Refresh Tracks
               </CircuitButton>
               <CircuitButton
-                onClick={handleDisconnect}
+                onClick={disconnect}
                 variant="secondary"
                 size="sm"
                 className="w-full"
@@ -616,11 +320,7 @@ const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: Phone
               </CircuitButton>
             </>
           ) : (
-            <CircuitButton
-              onClick={handleConnect}
-              size="sm"
-              className="w-full"
-            >
+            <CircuitButton onClick={() => connect()} size="sm" className="w-full">
               Connect
             </CircuitButton>
           )}
@@ -628,7 +328,4 @@ const PhoneVideoFeed = ({ isOpen, onClose, onExpand, isExpanded = false }: Phone
       </div>
     </div>
   );
-};
-
-export default PhoneVideoFeed;
-
+}

@@ -19,14 +19,22 @@
         startBtn.onclick = async () => {
             try {
             status.textContent = "Getting token...";
-            const r = await fetch("https://YOUR_PUBLIC_TOKEN_ENDPOINT/token?identity=phone");
+            
+            // Use local server token endpoint
+            const tokenUrl = `${window.location.protocol}//${window.location.hostname}:3000/token?identity=phone&t=${Date.now()}`;
+            const r = await fetch(tokenUrl, { method: "GET" });
+
+            if (!r.ok) {
+                const text = await r.text();
+                throw new Error(`Token fetch failed: ${r.status} - ${text}`);
+            }
 
             const data = await r.json();
 
             status.textContent = `Connecting to LiveKit... (${data.url})`;
-            const roomConn = new Room({
-                adaptiveStream: false,
-                dynacast: false,
+            const lkRoom = new Room({
+                adaptiveStream: true,
+                dynacast: true,
             });
 
             await lkRoom.connect(data.url, data.token);

@@ -16,12 +16,20 @@ const uploadsDir = path.join(__dirname, "..", "files", "schematic-diagrams");
 fs.mkdirSync(uploadsDir, { recursive: true });
 
 // CORS - MUST BE FIRST
-app.use(cors({
-  origin: "http://localhost:8080",
-  methods: ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: "http://localhost:8080",
+    methods: ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+    ],
+    credentials: true,
+  })
+);
 
 // Body parsers
 app.use(express.json());
@@ -33,34 +41,41 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * ✅ NO-CACHE for latest snapshot (only)
+ * This prevents the browser from showing an old cached copy.
+ */
+app.use((req, res, next) => {
+  if (req.path === "/schematics/latest.jpg") {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+  }
+  next();
+});
+
 // ---- TOKEN ----
 app.get("/token", async (req, res) => {
   try {
     const identity = String(req.query.identity || "").trim();
-    if (!identity)
-      return res.status(400).json({ error: "missing identity" });
+    if (!identity) return res.status(400).json({ error: "missing identity" });
 
     const url = String(process.env.LIVEKIT_URL || "").trim();
     const apiKey = String(process.env.LIVEKIT_API_KEY || "").trim();
     const apiSecret = String(process.env.LIVEKIT_API_SECRET || "").trim();
     const room = String(process.env.ROOM_NAME || "circuit").trim();
 
+    console.log("LIVEKIT_URL from env =", JSON.stringify(process.env.LIVEKIT_URL));
+
     if (!url.startsWith("wss://")) {
-      return res
-        .status(500)
-        .json({ error: "LIVEKIT_URL must start with wss://" });
+      return res.status(500).json({ error: "LIVEKIT_URL must start with wss://" });
     }
-
     if (!apiKey || !apiSecret) {
-      return res
-        .status(500)
-        .json({ error: "LIVEKIT_API_KEY and SECRET required" });
+      return res.status(500).json({ error: "LIVEKIT_API_KEY and SECRET required" });
     }
 
-    const at = new AccessToken(apiKey, apiSecret, {
-      identity,
-      ttl: 60 * 60,
-    });
+    const at = new AccessToken(apiKey, apiSecret, { identity, ttl: 60 * 60 });
 
     at.addGrant({
       room,
@@ -75,7 +90,7 @@ app.get("/token", async (req, res) => {
       url,
       room,
       canPublish: identity === "phone",
-      canSubscribe: true
+      canSubscribe: true,
     });
 
     res.json({ token: jwt, url, room });
@@ -85,32 +100,32 @@ app.get("/token", async (req, res) => {
   }
 });
 
-// ---- UPLOAD ----
+// ---- UPLOAD (existing - DO NOT BREAK) ----
+// Keep your current behavior here exactly.
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
-    // Always use the same filename to replace the previous file
-    const ext = path.extname(file.originalname) || '.jpg';
+    // Your existing naming logic
+    const ext = path.extname(file.originalname) || ".jpg";
     cb(null, `schematic${ext}`);
   },
 });
-
 const upload = multer({ storage });
 
 app.post("/upload", upload.single("photo"), (req, res) => {
   console.log("Upload request received:", {
     method: req.method,
-    headers: req.headers['content-type'],
+    headers: req.headers["content-type"],
     hasFile: !!req.file,
-    body: req.body
+    body: req.body,
   });
-  
+
   if (!req.file) {
     console.error("No file in request");
     return res.status(400).json({ error: "No file uploaded" });
   }
-  
-  // Delete all other files in the directory to keep only one file
+
+  // Your cleanup (unchanged)
   try {
     const files = fs.readdirSync(uploadsDir);
     files.forEach((file) => {
@@ -123,10 +138,31 @@ app.post("/upload", upload.single("photo"), (req, res) => {
   } catch (err) {
     console.error("Error cleaning up old files:", err);
   }
-  
+
   console.log(`File uploaded: ${req.file.filename} to ${req.file.destination}`);
   res.json({ ok: true, savedAs: req.file.filename });
 });
+
+// ---- UPLOAD LATEST (new, safe) ----
+// Only used by the camera snapshots; overwrites latest.jpg only.
+const storageLatest = multer.diskStorage({
+  destination: (_, __, cb) => cb(null, uploadsDir),
+  filename: (_, __, cb) => cb(null, "latest.jpg"),
+});
+const uploadLatest = multer({ storage: storageLatest });
+
+app.post("/upload-latest", uploadLatest.single("photo"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  res.json({
+    ok: true,
+    savedAs: req.file.filename,
+    url: "/schematics/latest.jpg",
+  });
+});
+
+// ✅ Serve the folder so the browser can GET latest.jpg
+app.use("/schematics", express.static(uploadsDir));
 
 // Static files - MUST be after routes
 app.use(express.static(path.join(__dirname, "public")));
@@ -136,4 +172,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Open phone:  http://localhost:${PORT}/phone.html`);
   console.log(`Open laptop: http://localhost:${PORT}/laptop.html`);
   console.log(`Upload endpoint: http://localhost:${PORT}/upload`);
+  console.log(`Latest endpoint: http://localhost:${PORT}/upload-latest`);
+  console.log(`Latest image: http://localhost:${PORT}/schematics/latest.jpg`);
 });
