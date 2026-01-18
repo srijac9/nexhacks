@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ override: true });
 
 const express = require("express");
 const multer = require("multer");
@@ -70,6 +70,13 @@ app.get("/token", async (req, res) => {
     });
 
     const jwt = await at.toJwt();
+
+    console.log(`[TOKEN] Generated token for identity="${identity}":`, {
+      url,
+      room,
+      canPublish: identity === "phone",
+      canSubscribe: true
+    });
 
     res.json({ token: jwt, url, room });
   } catch (e) {

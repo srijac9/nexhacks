@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CircuitButton from '@/components/CircuitButton';
 import CircuitBackground from '@/components/CircuitBackground';
-import { ArrowLeft, Mic, MicOff, Volume2 } from 'lucide-react';
+import PhoneVideoFeed from '@/components/PhoneVideoFeed';
+import { ArrowLeft, Mic, MicOff, Volume2, Video } from 'lucide-react';
 
 const SchematicViewer = () => {
   const navigate = useNavigate();
@@ -11,6 +12,8 @@ const SchematicViewer = () => {
   const [statusText, setStatusText] = useState('Ready to record');
   const [audioLevel, setAudioLevel] = useState(0);
   const [chunkCount, setChunkCount] = useState(0);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const [isVideoExpanded, setIsVideoExpanded] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -342,6 +345,14 @@ const SchematicViewer = () => {
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </CircuitButton>
+          <CircuitButton
+            variant="outline"
+            size="sm"
+            onClick={() => setIsVideoModalOpen(!isVideoModalOpen)}
+          >
+            <Video className="w-4 h-4 mr-2" />
+            {isVideoModalOpen ? 'Hide' : 'Show'} Phone Feed
+          </CircuitButton>
         </header>
 
         <div className="max-w-5xl mx-auto">
@@ -421,6 +432,14 @@ const SchematicViewer = () => {
           </div>
         </div>
       </div>
+
+      {/* Phone Video Feed Modal */}
+      <PhoneVideoFeed
+        isOpen={isVideoModalOpen}
+        onClose={() => setIsVideoModalOpen(false)}
+        onExpand={() => setIsVideoExpanded(!isVideoExpanded)}
+        isExpanded={isVideoExpanded}
+      />
     </div>
   );
 };

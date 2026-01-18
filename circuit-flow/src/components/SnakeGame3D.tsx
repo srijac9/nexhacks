@@ -645,33 +645,100 @@ export default function SnakeGame3D() {
       }
 
       animationId = requestAnimationFrame(gameLoop);
+      return;
     };
 
     animationId = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animationId);
   }, [nextDirection, snakeSide, getRandomPosition, getRandomType]);
 
-  return (
-    <div className="absolute inset-0 w-full h-full">
-      <Canvas shadows camera={{ position: [0, 10, 10], fov: 50 }} style={{ background: 'transparent' }}>
-        <fog attach="fog" args={['#0a0a0f', 12, 35]} />
-        <GameScene
-          snake={snake}
-          collectibles={collectibles}
-          direction={direction}
-          boardRotation={boardRotation}
-          snakeSide={snakeSide}
-        />
-      </Canvas>
+  // --- Scroll "focus" (NEW) ---
+  // 0 at top screen, 1 after you scroll ~1 viewport down
+  const [scrollT, setScrollT] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const h = window.innerHeight || 1;
+      const t = Math.min(1, Math.max(0, window.scrollY / h));
+      setScrollT(t);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
-      <div className="absolute bottom-4 left-4 text-circuit-green/60 text-sm font-mono pointer-events-none">
+  const titleOpacity = 0.05 + scrollT * 0.95;            // fade in
+  const titleScale = 0.96 + scrollT * 0.04;              // subtle "focus" zoom
+  const titleBlurPx = Math.round((1 - scrollT) * 10);    // starts blurry -> crisp
+  const dimOverlayOpacity = 0.0 + scrollT * 0.35;        // dims board behind title
+
+  return (
+    <div className="relative w-full" style={{ minHeight: '200vh' }}>
+      {/* Canvas stays perfectly centered and behind everything */}
+      <div className="fixed inset-0 w-full h-full">
+        <Canvas shadows camera={{ position: [0, 10, 10], fov: 50 }} style={{ background: 'transparent' }}>
+          <fog attach="fog" args={['#0a0a0f', 12, 35]} />
+          <GameScene
+            snake={snake}
+            collectibles={collectibles}
+            direction={direction}
+            boardRotation={boardRotation}
+            snakeSide={snakeSide}
+          />
+        </Canvas>
+
+        {/* Optional dimmer so text reads better when you scroll */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: `rgba(0,0,0,${dimOverlayOpacity})`,
+            transition: 'background 120ms ease-out'
+          }}
+        />
+      </div>
+
+      {/* HUD stays in the same places; doesn't affect centering */}
+      <div className="fixed bottom-4 left-4 text-circuit-green/60 text-sm font-mono pointer-events-none">
         <p>↑↓←→ Move Snake</p>
         <p>🖱️ Drag to rotate board 360°</p>
       </div>
 
-      <div className="absolute top-4 right-4 text-circuit-green font-mono pointer-events-none">
+      <div className="fixed top-4 right-4 text-circuit-green font-mono pointer-events-none">
         <p className="text-lg">Components: {snake.length - 1}</p>
         <p className="text-sm opacity-70">Snake on: {snakeSide.toUpperCase()} side</p>
+      </div>
+
+      {/* Scroll content layer (transparent, centered) */}
+      <div className="relative z-10">
+        {/* First screen: keeps the board as the main focus */}
+        <section className="h-screen w-full" />
+
+        {/* Second screen: title comes into focus while board remains centered behind it */}
+        <section className="h-screen w-full flex items-center justify-center px-6">
+          <div
+            className="max-w-3xl text-center select-none"
+            style={{
+              opacity: titleOpacity,
+              transform: `scale(${titleScale}) translateY(${(1 - scrollT) * 16}px)`,
+              filter: `blur(${titleBlurPx}px)`,
+              transition: 'opacity 140ms ease-out, transform 140ms ease-out, filter 140ms ease-out',
+              pointerEvents: 'none' // keeps drag-to-rotate working even over the text
+            }}
+          >
+            <h1 className="text-4xl md:text-6xl font-semibold text-circuit-green font-mono">
+              Circuit Snake: Breadboard Builder
+            </h1>
+            <p className="mt-4 text-circuit-green/70 font-mono leading-relaxed">
+              Scroll down to bring the title into focus while the breadboard stays centered behind it.
+              The game stays live the whole time.
+            </p>
+
+            <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur">
+              <p className="text-circuit-green/70 font-mono text-sm">
+                Tip: Arrow keys move. Mouse drag rotates. Keep collecting components.
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
