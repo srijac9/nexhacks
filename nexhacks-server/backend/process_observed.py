@@ -1,20 +1,22 @@
 # process_observed.py
 import os
+import time
+import asyncio
 import json
 import base64
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 load_dotenv()
 router = APIRouter()
 
 BASE_DIR = Path(__file__).parent
 
-OBSERVED_IMAGE_PATH = BASE_DIR / "sample-states" / "1.png"
+OBSERVED_IMAGE_PATH = BASE_DIR.parent.parent / "camera-capture" / "uploads" / "latest.jpg"
 OUTPUT_DIR = BASE_DIR / "observed-output"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -100,6 +102,8 @@ async def call_openrouter_vision(data_url: str) -> Dict[str, Any]:
     if not OPENROUTER_API_KEY:
         raise HTTPException(status_code=500, detail="Missing OPENROUTER_API_KEY in .env")
 
+    print(f"[process-observed] Using OpenRouter model={OPENROUTER_MODEL}")
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -123,9 +127,21 @@ async def call_openrouter_vision(data_url: str) -> Dict[str, Any]:
     }
 
     async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
-        if r.status_code >= 400:
-            raise HTTPException(status_code=502, detail=f"OpenRouter error {r.status_code}: {r.text}")
+        for attempt in range(3):
+            r = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=body,
+            )
+            if r.status_code == 429 and attempt < 2:
+                delay = 1.5 * (2 ** attempt)
+                print(f"[process-observed] OpenRouter 429 rate limit, retrying in {delay}s")
+                await asyncio.sleep(delay)
+                continue
+            if r.status_code >= 400:
+                print(f"[process-observed] OpenRouter error {r.status_code}: {r.text}")
+                raise HTTPException(status_code=502, detail=f"OpenRouter error {r.status_code}: {r.text}")
+            break
 
         data = r.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -146,16 +162,28 @@ async def call_openrouter_vision(data_url: str) -> Dict[str, Any]:
 
 
 @router.get("/process-observed")
-async def process_observed():
-    data_url = file_to_data_url(OBSERVED_IMAGE_PATH)
+async def process_observed(
+    image_path: Optional[str] = Query(
+        None,
+        description="Optional absolute path to the observed image to process.",
+    ),
+):
+    start_time = time.perf_counter()
+    observed_path = Path(image_path) if image_path else OBSERVED_IMAGE_PATH
+    print(f"[process-observed] Received request image_path={observed_path}")
+    data_url = file_to_data_url(observed_path)
     observed = await call_openrouter_vision(data_url)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / "1.json"
     out_path.write_text(json.dumps(observed, indent=2), encoding="utf-8")
 
+    duration_ms = int((time.perf_counter() - start_time) * 1000)
+    print(
+        f"[process-observed] Saved output to {out_path} in {duration_ms}ms"
+    )
     return {
-        "image": str(OBSERVED_IMAGE_PATH),
+        "image": str(observed_path),
         "observed": observed,
         "saved_to": str(out_path),
     }
