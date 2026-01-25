@@ -31,21 +31,41 @@
       const connectBtn = document.getElementById("connect");
       const wrap = document.getElementById("videoWrap");
 
-      const SNAP_EVERY_MS = 30 * 1000; // 30 seconds
+      const POLL_INTERVAL_MS = 1000; // Check every 1 second for new audio files
 
-      // ✅ IMPORTANT: your token/upload server is on 3000, but this page is on 8080
+      // ✅ IMPORTANT: your token/upload server is on 3000
       const API_BASE = "http://localhost:3000";
 
       let room;
       let attachedVideoEl = null;
-      let timerStarted = false;
+      let pollingStarted = false;
+      let lastAudioCheckTime = 0;
 
       async function getToken(identity) {
-        const r = await fetch(
-          `${API_BASE}/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`
-        );
-        if (!r.ok) throw new Error("token fetch failed: " + r.status);
-        return r.json();
+        try {
+          console.log(`[laptop.html] Fetching from: ${API_BASE}/token?identity=${identity}`);
+          const r = await fetch(
+            `${API_BASE}/token?identity=${encodeURIComponent(identity)}&t=${Date.now()}`,
+            {
+              method: "GET",
+              headers: {
+                "Accept": "application/json",
+              },
+            }
+          );
+          console.log(`[laptop.html] Response status: ${r.status}, ok: ${r.ok}`);
+          if (!r.ok) {
+            const errorText = await r.text();
+            console.error(`[laptop.html] Token fetch failed: ${r.status} - ${errorText}`);
+            throw new Error(`token fetch failed: ${r.status} - ${errorText}`);
+          }
+          const data = await r.json();
+          console.log(`[laptop.html] Token received successfully`);
+          return data;
+        } catch (error) {
+          console.error(`[laptop.html] Fetch error:`, error);
+          throw error;
+        }
       }
 
       function attachTrack(track) {
@@ -76,10 +96,18 @@
       }
 
       async function snapAndUpload() {
-        if (!attachedVideoEl || !attachedVideoEl.videoWidth || !attachedVideoEl.videoHeight) {
+        console.log(`[laptop.html] snapAndUpload called`);
+        if (!attachedVideoEl) {
+          console.log(`[laptop.html] No video element attached`);
+          return;
+        }
+        
+        if (!attachedVideoEl.videoWidth || !attachedVideoEl.videoHeight) {
+          console.log(`[laptop.html] Video not ready yet: ${attachedVideoEl.videoWidth}x${attachedVideoEl.videoHeight}`);
           return;
         }
 
+        console.log(`[laptop.html] Taking snapshot: ${attachedVideoEl.videoWidth}x${attachedVideoEl.videoHeight}`);
         const canvas = document.createElement("canvas");
         canvas.width = attachedVideoEl.videoWidth;
         canvas.height = attachedVideoEl.videoHeight;
@@ -89,27 +117,51 @@
         const blob = await new Promise((resolve) =>
           canvas.toBlob(resolve, "image/jpeg", 0.85)
         );
-        if (!blob) return;
+        if (!blob) {
+          console.log(`[laptop.html] Failed to create blob`);
+          return;
+        }
 
+        console.log(`[laptop.html] Uploading snapshot (${blob.size} bytes)...`);
         const fd = new FormData();
         fd.append("photo", blob, "circuit.jpg");
 
-        const up = await fetch(`${API_BASE}/upload-latest`, { method: "POST", body: fd });
-        if (up.ok) {
-          status.textContent = "Saved image @ " + new Date().toLocaleTimeString();
-        } else {
-          status.textContent = "Upload failed: " + up.status;
+        try {
+          const up = await fetch(`${API_BASE}/upload-latest`, { method: "POST", body: fd });
+          if (up.ok) {
+            const result = await up.json();
+            console.log(`[laptop.html] Snapshot saved successfully:`, result);
+            status.textContent = "Saved image @ " + new Date().toLocaleTimeString();
+          } else {
+            const errorText = await up.text();
+            console.error(`[laptop.html] Upload failed: ${up.status} - ${errorText}`);
+            status.textContent = "Upload failed: " + up.status;
+          }
+        } catch (error) {
+          console.error(`[laptop.html] Upload error:`, error);
+          status.textContent = "Upload error: " + error.message;
         }
       }
 
       connectBtn.onclick = async () => {
         try {
           status.textContent = "Getting token...";
-          const data = await getToken("laptop");
+          console.log(`[laptop.html] Fetching token from ${API_BASE}/token`);
+          
+          let data;
+          try {
+            data = await getToken("laptop");
+            console.log(`[laptop.html] Token received:`, { url: data.url, room: data.room });
+          } catch (tokenError) {
+            console.error(`[laptop.html] Token fetch error:`, tokenError);
+            status.textContent = `Token error: ${tokenError.message}. Is server running on ${API_BASE}?`;
+            return;
+          }
 
           status.textContent = "Connecting to LiveKit...";
           room = new Room({ adaptiveStream: false, dynacast: false });
           await room.connect(data.url, data.token);
+          console.log(`[laptop.html] Connected to LiveKit room: ${data.room}`);
 
           status.textContent = "Waiting for phone video...";
           connectBtn.disabled = true;
@@ -119,9 +171,11 @@
               attachTrack(track);
               status.textContent = "Video connected ✓";
 
-              if (!timerStarted) {
-                timerStarted = true;
-                setInterval(snapAndUpload, SNAP_EVERY_MS);
+              if (!pollingStarted) {
+                pollingStarted = true;
+                lastAudioCheckTime = Date.now();
+                console.log(`[laptop.html] Starting audio file polling: every ${POLL_INTERVAL_MS}ms`);
+                startAudioPolling();
               }
             }
           });
@@ -130,6 +184,33 @@
           status.textContent = "Connect failed: " + (e?.message || String(e));
         }
       };
+
+      async function checkForNewAudio() {
+        try {
+          const response = await fetch(
+            `${API_BASE}/check-new-audio?since=${lastAudioCheckTime}`
+          );
+          if (response.ok) {
+            const data = await response.json();
+            if (data.hasNewAudio) {
+              console.log(`[laptop.html] New audio file detected! Taking snapshot...`);
+              lastAudioCheckTime = data.timestamp || Date.now();
+              await snapAndUpload();
+            }
+          }
+        } catch (error) {
+          // Silently fail - server might be down or endpoint not available
+          console.debug(`[laptop.html] Audio check failed:`, error.message);
+        }
+      }
+
+      function startAudioPolling() {
+        // Poll for new audio files
+        setInterval(() => {
+          checkForNewAudio();
+        }, POLL_INTERVAL_MS);
+        console.log(`[laptop.html] Audio polling started`);
+      }
     </script>
   </body>
 </html>

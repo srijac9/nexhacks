@@ -32,6 +32,9 @@ export default function PhoneVideoFeed({
   const videoElRef = useRef<HTMLVideoElement | null>(null);
 
   const attachedTrackRef = useRef<Track | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const snapshotIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastAudioCheckTimeRef = useRef<number>(0);
 
   const getToken = useCallback(async (identity: string) => {
     const tokenUrl = `${API_BASE}/token?identity=${encodeURIComponent(
@@ -173,6 +176,26 @@ export default function PhoneVideoFeed({
       if (track.kind === "video") {
         attachTrackToVideo(track, participant.identity);
         setStatus("Video connected ✓");
+        
+        // Start audio polling when video connects
+        if (!pollingIntervalRef.current) {
+          lastAudioCheckTimeRef.current = Date.now();
+          startAudioPolling();
+        }
+        
+        // Start 30-second snapshot timer for testing
+        if (!snapshotIntervalRef.current) {
+          console.log("[PhoneVideoFeed] Starting 30-second snapshot timer...");
+          // Wait 2 seconds for video to be ready, then start interval
+          setTimeout(() => {
+            snapshotIntervalRef.current = setInterval(() => {
+              console.log("[PhoneVideoFeed] 30-second timer fired, taking snapshot...");
+              snapAndUpload();
+            }, 30000); // 30 seconds
+            // Take first snapshot after initial delay
+            snapAndUpload();
+          }, 2000);
+        }
       }
     });
 
@@ -196,11 +219,114 @@ export default function PhoneVideoFeed({
   }, [getToken, attachTrackToVideo, detachCurrent, subscribeExisting]);
 
   const disconnect = useCallback(() => {
+    // Stop audio polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    
+    // Stop snapshot timer
+    if (snapshotIntervalRef.current) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
+    }
+    
     detachCurrent();
     roomRef.current?.disconnect();
     roomRef.current = null;
     setStatus("Disconnected");
   }, [detachCurrent]);
+
+  const snapAndUpload = useCallback(async () => {
+    const videoEl = videoElRef.current;
+    if (!videoEl || !isVideoAttached) {
+      console.log("[PhoneVideoFeed] No video element or video not attached");
+      return;
+    }
+
+    if (!videoEl.videoWidth || !videoEl.videoHeight) {
+      console.log(
+        `[PhoneVideoFeed] Video not ready yet: ${videoEl.videoWidth}x${videoEl.videoHeight}`
+      );
+      return;
+    }
+
+    console.log(
+      `[PhoneVideoFeed] Taking snapshot: ${videoEl.videoWidth}x${videoEl.videoHeight}`
+    );
+
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        console.error("[PhoneVideoFeed] Failed to get canvas context");
+        return;
+      }
+
+      ctx.drawImage(videoEl, 0, 0);
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", 0.85)
+      );
+
+      if (!blob) {
+        console.error("[PhoneVideoFeed] Failed to create blob");
+        return;
+      }
+
+      console.log(`[PhoneVideoFeed] Uploading snapshot (${blob.size} bytes)...`);
+      const formData = new FormData();
+      formData.append("photo", blob, "circuit.jpg");
+
+      const response = await fetch(`${API_BASE}/upload-latest`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`[PhoneVideoFeed] Snapshot saved successfully:`, result);
+        setStatus(`Snapshot saved @ ${new Date().toLocaleTimeString()}`);
+      } else {
+        const errorText = await response.text();
+        console.error(`[PhoneVideoFeed] Upload failed: ${response.status} - ${errorText}`);
+        setStatus(`Upload failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(`[PhoneVideoFeed] Snapshot error:`, error);
+      setStatus(`Snapshot error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [isVideoAttached]);
+
+  const checkForNewAudio = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE}/check-new-audio?since=${lastAudioCheckTimeRef.current}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.hasNewAudio) {
+          console.log(`[PhoneVideoFeed] New audio file detected! Taking snapshot...`);
+          lastAudioCheckTimeRef.current = data.timestamp || Date.now();
+          await snapAndUpload();
+        }
+      }
+    } catch (error) {
+      // Silently fail - server might be down or endpoint not available
+      console.debug(`[PhoneVideoFeed] Audio check failed:`, error);
+    }
+  }, [snapAndUpload]);
+
+  const startAudioPolling = useCallback(() => {
+    if (pollingIntervalRef.current) return; // Already polling
+
+    console.log(`[PhoneVideoFeed] Starting audio file polling...`);
+    pollingIntervalRef.current = setInterval(() => {
+      checkForNewAudio();
+    }, 1000); // Check every 1 second
+  }, [checkForNewAudio]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -209,6 +335,41 @@ export default function PhoneVideoFeed({
       disconnect();
     };
   }, [isOpen, connect, disconnect]);
+
+  useEffect(() => {
+    if (!isVideoAttached) return;
+
+    if (!pollingIntervalRef.current) {
+      lastAudioCheckTimeRef.current = Date.now();
+      console.log("[PhoneVideoFeed] Video attached, starting audio polling...");
+      startAudioPolling();
+    }
+
+    if (!snapshotIntervalRef.current) {
+      console.log("[PhoneVideoFeed] Video attached, starting 30-second snapshot timer...");
+      setTimeout(() => {
+        snapshotIntervalRef.current = setInterval(() => {
+          console.log("[PhoneVideoFeed] 30-second timer fired, taking snapshot...");
+          snapAndUpload();
+        }, 30000);
+        snapAndUpload();
+      }, 2000);
+    }
+  }, [isVideoAttached, startAudioPolling, snapAndUpload]);
+
+  // Cleanup polling and timers on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      if (snapshotIntervalRef.current) {
+        clearInterval(snapshotIntervalRef.current);
+        snapshotIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 

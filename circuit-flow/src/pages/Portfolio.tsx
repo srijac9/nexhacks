@@ -75,7 +75,7 @@ const Portfolio = () => {
             </div>
           </div>
         </section>
-
+        
         {/* Stats section */}
         <section className="border-t border-b border-border py-12 mb-20">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
