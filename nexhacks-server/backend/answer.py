@@ -13,9 +13,11 @@ load_dotenv()
 router = APIRouter()
 
 BASE_DIR = Path(__file__).parent
-TARGET_PATH = BASE_DIR / "sample-targets" / "1.json"
+TARGET_PATH = BASE_DIR / "schematic-output" / "schematic.json"
 OBSERVED_PATH = BASE_DIR / "sample-observed" / "1.json"
 QUESTION_PATH = BASE_DIR / "sample-questions" / "1.txt"
+ANSWER_OUTPUT_DIR = BASE_DIR / "answer-output"
+ANSWER_OUTPUT_PATH = ANSWER_OUTPUT_DIR / "latest.json"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "mistralai/mistral-small-3.1-24b-instruct:free")
@@ -179,7 +181,10 @@ async def answer_get():
         "observedBoard": observed,
         "analysis": analysis,
     }
-    return await call_openrouter(payload)
+    result = await call_openrouter(payload)
+    ANSWER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ANSWER_OUTPUT_PATH.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result
 
 
 # Optional: keep POST /answer for direct questions (useful for later UI)
@@ -196,4 +201,7 @@ async def answer_post(req: AnswerRequest):
         "observedBoard": observed,
         "analysis": analysis,
     }
-    return await call_openrouter(payload)
+    result = await call_openrouter(payload)
+    ANSWER_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ANSWER_OUTPUT_PATH.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result
