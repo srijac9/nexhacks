@@ -30,36 +30,53 @@ const ImageUpload = () => {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
-
+    console.log('handleUpload called, selectedFile:', selectedFile?.name || 'none');
     setUploading(true);
     setUploadStatus('idle');
     setStatusMessage('Uploading...');
 
-    const formData = new FormData();
-    formData.append('photo', selectedFile, selectedFile.name);
-
     try {
-      // Use proxy - Vite will forward to http://localhost:3000
-      // const response = await fetch('/upload', {
-      //   method: 'POST',
-      //   body: formData,
-      // });
+      // Upload file if one is selected
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('photo', selectedFile, selectedFile.name);
 
-      const response =await fetch("http://localhost:3000/upload", { method: "POST", body: formData });
+        const response = await fetch("http://localhost:3000/upload", { 
+          method: "POST", 
+          body: formData 
+        });
 
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
+          throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+        }
+      }
 
-      if (response.ok) {
-        const data = await response.json();
+      // Always call process-schematic after upload (or even if no file selected)
+      // It will process whatever schematic is in files/schematic-diagrams
+      setStatusMessage('Processing schematic...');
+      console.log('Calling process-schematic endpoint...');
+      
+      const processResponse = await fetch("http://localhost:8001/process-schematic?save=true", {
+        method: 'GET'
+      });
+
+      console.log('Process schematic response status:', processResponse.status);
+
+      if (processResponse.ok) {
+        const processData = await processResponse.json();
+        console.log('Process schematic success:', processData);
         setUploadStatus('success');
-        setStatusMessage(`Successfully uploaded: ${data.savedAs || selectedFile.name}`);
+        const uploadMsg = selectedFile ? `Successfully uploaded: ${selectedFile.name}` : '';
+        setStatusMessage(`${uploadMsg ? uploadMsg + '. ' : ''}Schematic processed successfully`);
       } else {
-        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
-        throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+        const errorData = await processResponse.json().catch(() => ({ detail: `HTTP ${processResponse.status}: ${processResponse.statusText}` }));
+        console.error('Process schematic error:', errorData);
+        throw new Error(errorData.detail || `Failed to process schematic: ${processResponse.status}`);
       }
     } catch (error: any) {
       // Silently handle errors - only log to console
-      console.error('Upload error:', error);
+      console.error('Upload/processing error:', error);
       // Don't set error status or message to avoid UI popups
     } finally {
       setUploading(false);
@@ -115,24 +132,38 @@ const ImageUpload = () => {
           {/* Upload area */}
           <div className="bg-card/50 backdrop-blur-sm border border-border rounded-lg p-8 mb-8">
             {!preview ? (
-              <div
-                className="border-2 border-dashed border-border rounded-lg p-12 text-center cursor-pointer hover:border-primary transition-colors"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <ImageIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                <p className="font-mono text-lg text-foreground mb-2">
-                  Click to select an image
-                </p>
-                <p className="font-mono text-sm text-muted-foreground">
-                  or drag and drop here
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
+              <div className="space-y-4">
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-12 text-center cursor-pointer hover:border-primary transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <ImageIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <p className="font-mono text-lg text-foreground mb-2">
+                    Click to select an image
+                  </p>
+                  <p className="font-mono text-sm text-muted-foreground">
+                    or drag and drop here
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                </div>
+                <div className="text-center">
+                  <p className="font-mono text-sm text-muted-foreground mb-2">
+                    or process existing schematic
+                  </p>
+                  <CircuitButton
+                    onClick={handleUpload}
+                    disabled={uploading}
+                    size="lg"
+                  >
+                    {uploading ? 'Processing...' : 'Process Schematic'}
+                  </CircuitButton>
+                </div>
               </div>
             ) : (
               <div className="space-y-4">
@@ -160,7 +191,7 @@ const ImageUpload = () => {
                     disabled={uploading}
                     size="lg"
                   >
-                    {uploading ? 'Uploading...' : 'Upload Image'}
+                    {uploading ? 'Processing...' : 'Upload & Process'}
                   </CircuitButton>
                 </div>
               </div>

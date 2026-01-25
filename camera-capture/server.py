@@ -9,11 +9,14 @@ import logging
 import whisper
 import glob
 
+# Import schematic processing router
+from process_schematic import router as process_schematic_router
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Audio Recording API")
+app = FastAPI(title="Circuit Tutor API")
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -23,6 +26,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include schematic processing router
+app.include_router(process_schematic_router)
 
 # Base directory - go up from camera-capture to nexhacks root
 BASE_DIR = Path(__file__).parent.parent
@@ -48,7 +54,7 @@ except Exception as e:
 
 @app.get("/")
 async def root():
-    return {"message": "Audio Recording API is running"}
+    return {"message": "Circuit Tutor API is running", "routes": ["/upload-audio", "/transcript", "/process-schematic", "/docs"]}
 
 
 def cleanup_old_files(directory: str, pattern: str):
