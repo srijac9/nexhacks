@@ -10,6 +10,7 @@ const { AccessToken } = require("livekit-server-sdk");
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const ROOM_NAME = String(process.env.ROOM_NAME || "circuit").trim();
+const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
 // Save uploaded images to files/schematic-diagrams (for /upload endpoint)
 const uploadsDir = path.join(__dirname, "..", "files", "schematic-diagrams");
@@ -65,6 +66,60 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ---- Helpers to talk to Python backend ----
+async function triggerAnswerUpdate(reason) {
+  try {
+    console.log(
+      `[answer-update] Triggered by ${reason}, calling ${BACKEND_URL}/answer`
+    );
+    const resp = await fetch(`${BACKEND_URL}/answer`);
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error(
+        `[answer-update] /answer failed (${resp.status}): ${text.slice(0, 300)}`
+      );
+    } else {
+      console.log("[answer-update] /answer completed successfully");
+    }
+  } catch (err) {
+    console.error("[answer-update] Error calling /answer:", err);
+  }
+}
+
+async function triggerImagePipeline() {
+  try {
+    console.log(
+      `[image-pipeline] Calling ${BACKEND_URL}/process-observed then ${BACKEND_URL}/answer`
+    );
+
+    const r1 = await fetch(`${BACKEND_URL}/process-observed`);
+    if (!r1.ok) {
+      const t = await r1.text();
+      console.error(
+        `[image-pipeline] /process-observed failed (${r1.status}): ${t.slice(
+          0,
+          300
+        )}`
+      );
+      return;
+    }
+
+    const r2 = await fetch(`${BACKEND_URL}/answer`);
+    if (!r2.ok) {
+      const t = await r2.text();
+      console.error(
+        `[image-pipeline] /answer failed (${r2.status}): ${t.slice(0, 300)}`
+      );
+    } else {
+      console.log(
+        "[image-pipeline] Successfully updated answer-output/latest.json"
+      );
+    }
+  } catch (err) {
+    console.error("[image-pipeline] Error running image pipeline:", err);
+  }
+}
 
 // ---- TOKEN ----
 app.get("/token", async (req, res) => {
@@ -191,6 +246,13 @@ app.get("/check-new-audio", (req, res) => {
       }
     }
 
+    // If we saw at least one new audio file, trigger an answer refresh in the Python backend.
+    if (hasNewAudio) {
+      triggerAnswerUpdate("new-audio").catch((err) =>
+        console.error("[check-new-audio] Failed to trigger answer update:", err)
+      );
+    }
+
     res.json({ 
       hasNewAudio, 
       timestamp: latestFileTime,
@@ -212,6 +274,11 @@ const uploadLatest = multer({ storage: storageLatest });
 
 app.post("/upload-latest", uploadLatest.single("photo"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  // Fire-and-forget: process latest.jpg into observed JSON, then refresh answer-output/latest.json
+  triggerImagePipeline().catch((err) =>
+    console.error("[upload-latest] Failed to trigger image pipeline:", err)
+  );
 
   res.json({
     ok: true,

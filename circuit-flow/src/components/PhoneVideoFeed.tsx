@@ -182,20 +182,6 @@ export default function PhoneVideoFeed({
           lastAudioCheckTimeRef.current = Date.now();
           startAudioPolling();
         }
-        
-        // Start 30-second snapshot timer for testing
-        if (!snapshotIntervalRef.current) {
-          console.log("[PhoneVideoFeed] Starting 30-second snapshot timer...");
-          // Wait 2 seconds for video to be ready, then start interval
-          setTimeout(() => {
-            snapshotIntervalRef.current = setInterval(() => {
-              console.log("[PhoneVideoFeed] 30-second timer fired, taking snapshot...");
-              snapAndUpload();
-            }, 30000); // 30 seconds
-            // Take first snapshot after initial delay
-            snapAndUpload();
-          }, 2000);
-        }
       }
     });
 
