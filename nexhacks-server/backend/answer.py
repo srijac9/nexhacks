@@ -18,7 +18,8 @@ router = APIRouter()
 BASE_DIR = Path(__file__).parent
 # Use a proper Path for the shared schematic-output file
 TARGET_PATH = Path(r"C:\Users\srich\nexhacks\files\schematic-output\schematic.json")
-OBSERVED_PATH = BASE_DIR / "sample-observed" / "1.json"
+OBSERVED_PATH = BASE_DIR / "observed-output" / "1.json"
+FALLBACK_OBSERVED_PATH = BASE_DIR / "sample-observed" / "1.json"
 QUESTION_PATH = BASE_DIR / "sample-questions" / "1.txt"
 ANSWER_OUTPUT_DIR = BASE_DIR / "answer-output"
 ANSWER_OUTPUT_PATH = ANSWER_OUTPUT_DIR / "latest.json"
@@ -53,6 +54,13 @@ def load_text(p: Path) -> str:
         logger.error(f"[answer] Empty text file: {p.name}")
         raise HTTPException(status_code=500, detail=f"Empty file: {p.name}")
     return text
+
+
+def load_observed_json() -> Dict[str, Any]:
+    # Prefer live output produced by /process-observed; fallback to sample data.
+    if OBSERVED_PATH.exists():
+        return load_json(OBSERVED_PATH)
+    return load_json(FALLBACK_OBSERVED_PATH)
 
 
 
@@ -215,7 +223,7 @@ async def answer_get():
     logger.info("[answer] GET /answer called")
     try:
         target = load_json(TARGET_PATH)
-        observed = load_json(OBSERVED_PATH)
+        observed = load_observed_json()
         question = load_text(QUESTION_PATH)
         logger.info(
             f"[answer] Using question from {QUESTION_PATH.name}: {question[:120]!r}"
@@ -256,7 +264,7 @@ async def answer_post(req: AnswerRequest):
     logger.info("[answer] POST /answer called")
     try:
         target = req.target or load_json(TARGET_PATH)
-        observed = req.observed or load_json(OBSERVED_PATH)
+        observed = req.observed or load_observed_json()
         question = req.question or load_text(QUESTION_PATH)
         logger.info(f"[answer] POST question: {str(question)[:120]!r}")
         analysis = req.analysis or await fetch_latest_analysis_if_configured()
